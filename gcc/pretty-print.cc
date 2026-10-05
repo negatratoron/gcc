@@ -1081,8 +1081,10 @@ pretty_printer::set_real_maximum_length ()
 inline void
 pretty_printer::clear_state ()
 {
-  m_emitted_prefix = false;
-  pp_indentation (this) = 0;
+  if (m_emitted_prefix) {
+    m_emitted_prefix = false;
+    pp_indentation (this) -= 3;
+  }
 }
 
 /* Print X to PP in decimal.  */

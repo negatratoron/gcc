@@ -72,11 +72,15 @@ void
 pp_cxx_begin_template_argument_list (cxx_pretty_printer *pp)
 {
   pp_cxx_nonconsecutive_character (pp, '<');
+  if (flag_indent_template_trees)
+    pp_indentation (pp) += 3;
 }
 
 void
 pp_cxx_end_template_argument_list (cxx_pretty_printer *pp)
 {
+  if (flag_indent_template_trees)
+    pp_newline_and_indent (pp, -3);
   pp_cxx_nonconsecutive_character (pp, '>');
 }
 
@@ -2025,6 +2029,9 @@ pp_cxx_template_argument_list (cxx_pretty_printer *pp, tree t)
 
       for (idx = 0; idx < len; idx++)
 	{
+	  if (flag_indent_template_trees)
+	    pp_newline_and_indent (pp, 0);
+
 	  if (argpack)
 	    arg = TREE_VEC_ELT (argpack, idx);
 

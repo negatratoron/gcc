@@ -66,7 +66,7 @@ static const char *fndecl_to_string (tree, int);
 static const char *op_to_string	(bool, enum tree_code);
 static const char *parm_to_string (int);
 static const char *type_to_string (tree, int, bool, bool *, bool,
-				   const char * = nullptr);
+				   const char * = nullptr, int = 0);
 
 static void dump_alias_template_specialization (cxx_pretty_printer *, tree, int);
 static void dump_type (cxx_pretty_printer *, tree, int);
@@ -2301,6 +2301,9 @@ dump_template_parms (cxx_pretty_printer *pp, tree info,
                   || TREE_VEC_LENGTH (ARGUMENT_PACK_ARGS (arg)) > 0))
             pp_separate_with_comma (pp);
 
+	  if (flag_indent_template_trees)
+	    pp_newline_and_indent (pp, 0);
+
           if (!arg)
             pp_string (pp, M_("<template parameter error>"));
           else
@@ -3836,7 +3839,7 @@ op_to_string (bool assop, enum tree_code p)
 
 static const char *
 type_to_string (tree typ, int verbose, bool postprocessed, bool *quote,
-		bool show_color, const char *highlight_color)
+		bool show_color, const char *highlight_color, int indent)
 {
   int flags = 0;
   if (verbose)
@@ -3845,6 +3848,7 @@ type_to_string (tree typ, int verbose, bool postprocessed, bool *quote,
 
   reinit_cxx_pp ();
   pp_show_color (cxx_pp) = show_color;
+  pp_indentation (cxx_pp) = indent;
 
   if (postprocessed && quote && *quote)
     {
@@ -4641,23 +4645,13 @@ comparable_template_types_p (tree type_a, tree type_b)
   return TI_TEMPLATE (tinfo_a) == TI_TEMPLATE (tinfo_b);
 }
 
-/* Start a new line indented by SPC spaces on PP.  */
-
-static void
-newline_and_indent (pretty_printer *pp, int spc)
-{
-  pp_newline (pp);
-  for (int i = 0; i < spc; i++)
-    pp_space (pp);
-}
-
 /* Generate a GC-allocated string for ARG, an expression or type.  */
 
 static const char *
-arg_to_string (tree arg, bool verbose)
+arg_to_string (tree arg, bool verbose, int indent)
 {
   if (TYPE_P (arg))
-    return type_to_string (arg, verbose, true, NULL, false);
+    return type_to_string (arg, verbose, true, NULL, false, NULL, indent);
   else
     return expr_to_string (arg);
 }
@@ -4671,14 +4665,14 @@ arg_to_string (tree arg, bool verbose)
 
 static void
 print_nonequal_arg (pretty_printer *pp, tree arg, bool verbose,
-		    const char *highlight_color)
+		    const char *highlight_color, int indent)
 {
   if (!highlight_color)
     highlight_color = "type-diff";
   pp_printf (pp, "%r%s%R",
 	     highlight_color,
 	     (arg
-	      ? arg_to_string (arg, verbose)
+	      ? arg_to_string (arg, verbose, indent)
 	      : G_("(no argument)")));
 }
 
@@ -4732,8 +4726,11 @@ print_template_differences (pretty_printer *pp, tree type_a, tree type_b,
 			    const char *highlight_color_a,
 			    const char *highlight_color_b)
 {
-  if (indent)
-    newline_and_indent (pp, indent);
+  if (flag_indent_template_trees)
+    {
+      pp_newline_and_indent (pp, 0);
+      pp_indentation (pp) += indent;
+    }
 
   tree tinfo_a = TYPE_TEMPLATE_INFO (type_a);
   tree tinfo_b = TYPE_TEMPLATE_INFO (type_b);
@@ -4765,38 +4762,42 @@ print_template_differences (pretty_printer *pp, tree type_a, tree type_b,
       if (idx)
 	pp_character (pp, ',');
 
+      if (flag_indent_template_trees)
+	pp_newline_and_indent (pp, 0);
+
       tree arg_a = TREE_VEC_ELT (args_a, idx);
       tree arg_b = TREE_VEC_ELT (args_b, idx);
+
       if (arg_a == arg_b)
 	{
-	  if (indent)
-	    newline_and_indent (pp, indent + 2);
 	  /* Can do elision here, printing "[...]".  */
 	  if (flag_elide_type)
 	    pp_string (pp, G_("[...]"));
 	  else
-	    pp_string (pp, arg_to_string (arg_a, verbose));
+	    pp_string (pp, arg_to_string (arg_a, verbose, indent));
 	}
       else
 	{
-	  int new_indent = indent ? indent + 2 : 0;
 	  if (comparable_template_types_p (arg_a, arg_b))
-	    print_template_differences (pp, arg_a, arg_b, verbose, new_indent,
+	    print_template_differences (pp, arg_a, arg_b, verbose, indent,
 					highlight_color_a, highlight_color_b);
+
+	  if (flag_diagnostics_show_template_tree)
+	    {
+	      pp_character (pp, '[');
+	      print_nonequal_arg (pp, arg_a, verbose, highlight_color_a, indent);
+	      pp_string (pp, " != ");
+	      print_nonequal_arg (pp, arg_b, verbose, highlight_color_b, indent);
+	      pp_character (pp, ']');
+	    }
 	  else
-	    if (indent)
-	      {
-		newline_and_indent (pp, indent + 2);
-		pp_character (pp, '[');
-		print_nonequal_arg (pp, arg_a, verbose, highlight_color_a);
-		pp_string (pp, " != ");
-		print_nonequal_arg (pp, arg_b, verbose, highlight_color_b);
-		pp_character (pp, ']');
-	      }
-	    else
-	      print_nonequal_arg (pp, arg_a, verbose, highlight_color_a);
+	    print_nonequal_arg (pp, arg_a, verbose, highlight_color_a, indent);
 	}
     }
+
+  if (flag_indent_template_trees)
+    pp_newline_and_indent (pp, -indent);
+
   pp_printf (pp, ">");
 }
 
@@ -4828,52 +4829,10 @@ type_to_string_with_compare (tree type, tree peer, bool verbose,
   pretty_printer *pp = &inner_pp;
   pp_show_color (pp) = show_color;
 
-  print_template_differences (pp, type, peer, verbose, 0,
+  int indent = flag_indent_template_trees ? 3 : 0;
+  print_template_differences (pp, type, peer, verbose, indent,
 			      this_highlight_color, peer_highlight_color);
   return pp_ggc_formatted_text (pp);
-}
-
-/* Recursively print a tree-like comparison of TYPE_A and TYPE_B to PP,
-   indented by INDENT spaces.
-
-   For example given types:
-
-     vector<map<int,double>>
-
-   and
-
-     vector<map<double,float>>
-
-   the output with type elision would be:
-
-     vector<
-       map<
-         [...],
-         [double != float]>>
-
-   and without type-elision would be:
-
-     vector<
-       map<
-         int,
-         [double != float]>>
-
-   TYPE_A and TYPE_B must both be comparable template types
-   (as per comparable_template_types_p).
-
-   Template arguments in which both types are using the default arguments
-   are not printed; if at least one of the two types is using a non-default
-   argument, then both arguments are printed.  */
-
-static void
-print_template_tree_comparison (pretty_printer *pp, tree type_a, tree type_b,
-				bool verbose, int indent,
-				const char *highlight_color_a,
-				const char *highlight_color_b)
-{
-  print_template_differences (pp, type_a, type_b, verbose, indent,
-			      highlight_color_a,
-			      highlight_color_b);
 }
 
 /* Subroutine for use in a format_postprocessor::handle
@@ -4941,7 +4900,7 @@ cxx_format_postprocessor::handle (pretty_printer *pp)
 	    {
 	      pretty_printer inner_pp;
 	      pp_show_color (&inner_pp) = pp_show_color (pp);
-	      print_template_tree_comparison
+	      print_template_differences
 		(&inner_pp, type_a.m_tree, type_b.m_tree, type_a.m_verbose, 2,
 		 percent_h, percent_i);
 	      append_formatted_chunk (pp, pp_ggc_formatted_text (&inner_pp));

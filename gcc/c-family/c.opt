@@ -2361,6 +2361,10 @@ fpretty-templates
 C++ ObjC++ Var(flag_pretty_templates) Init(1)
 Do not pretty-print template specializations as the template signature followed by the arguments.
 
+findent-template-trees
+C++ ObjC++ Var(flag_indent_template_trees) Init(0)
+Indent template trees in C++ pretty printer
+
 fprintf-return-value
 C ObjC C++ ObjC++ LTO Optimization Var(flag_printf_return_value) Init(1)
 Treat known sprintf return values as constants.
